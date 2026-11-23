@@ -4,9 +4,13 @@ import type { PageContext } from "../../core/types/ai";
 const MAX_CHARS = 30000;
 
 export function extractPage(): PageContext {
-    // Readability mutates the DOM it parses, so always give it a clone
-    const clone = document.cloneNode(true) as Document;
-    const article = new Readability(clone).parse();
+    // Parse a detached document so Readability doesn't mutate the live webpage.
+    const parsedDocument = new DOMParser().parseFromString(
+        document.documentElement.outerHTML,
+        "text/html"
+    );
+
+    const article = new Readability(parsedDocument).parse();
 
     const headings = Array.from(document.querySelectorAll("h1, h2, h3"))
         .map((h) => h.textContent?.trim() ?? "")
