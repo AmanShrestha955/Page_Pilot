@@ -20,9 +20,11 @@ export function extractPage(): PageContext {
 
     return {
         url: location.href,
+        domain: location.hostname,
         title: article?.title || document.title,
         headings,
         content,
         selectedText,
+        extractedAt: Date.now(),
     };
 }

@@ -6,13 +6,13 @@ export default defineManifest({
     version: "0.1.0",
     description: "Understand the internet, not just read it.",
     icons: {
-        "16": "group.png",
-        "48": "group.png",
-        "128": "group.png",
+        "16": "icon.png",
+        "48": "icon.png",
+        "128": "icon.png",
     },
     action: {
         default_title: "Open PagePilot",
-        default_icon: "group.png",
+        default_icon: "icon.png",
     },
     side_panel: { default_path: "index.html" },
     background: { service_worker: "src/extension/background/service-worker.ts", type: "module" },
