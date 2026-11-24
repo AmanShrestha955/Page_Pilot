@@ -52,14 +52,47 @@ function validateRequest(request: AIRequest): void {
     }
 }
 
+
 function getErrorCode(error: unknown): AIErrorCode {
     if (error instanceof AIServiceError) {
         return error.code;
     }
 
+    const errorCode =
+        typeof error === "object" &&
+            error !== null &&
+            "code" in error &&
+            typeof error.code === "string"
+            ? error.code.toLowerCase()
+            : "";
+
     const message =
         error instanceof Error ? error.message.toLowerCase() : "";
 
+    // Classify structured SDK error codes first.
+    if (
+        errorCode.includes("resource-exhausted") ||
+        errorCode.includes("too-many-requests")
+    ) {
+        return "RATE_LIMITED";
+    }
+
+    if (
+        errorCode.includes("unauthenticated") ||
+        errorCode.includes("permission-denied") ||
+        errorCode.includes("app-check")
+    ) {
+        return "AUTHENTICATION_FAILED";
+    }
+
+    if (
+        errorCode.includes("network") ||
+        errorCode.includes("deadline-exceeded")
+    ) {
+        return "NETWORK_ERROR";
+    }
+
+    // Fall back to message matching for non-standard errors.
     if (message.includes("429") || message.includes("resource-exhausted")) {
         return "RATE_LIMITED";
     }
@@ -89,6 +122,7 @@ function getErrorCode(error: unknown): AIErrorCode {
 
     return "INFERENCE_FAILED";
 }
+
 
 export async function explainPage(
     request: AIRequest
