@@ -1,18 +1,37 @@
+
 import type { AIRequest } from "../../core/types/ai";
 
 export function buildExplainPrompt(request: AIRequest): string {
-    const { task, context, difficulty = "intermediate", question } = request;
+    const {
+        task,
+        context,
+        difficulty = "intermediate",
+        question,
+    } = request;
 
+    const selectedText = context.selectedText?.trim();
+
+    // Explain and simplify can focus on selected text.
+    // Summarize and ask must retain the full webpage context.
     const focusedText =
-        task === "summarize"
-            ? context.content
-            : context.selectedText?.trim() || context.content;
+        task === "explain" || task === "simplify"
+            ? selectedText || context.content
+            : context.content;
 
     const taskInstructions: Record<AIRequest["task"], string> = {
-        explain: "Explain the provided material clearly. Break down difficult concepts and include practical examples where useful.",
-        simplify: "Rewrite the provided material in simpler language without losing its important meaning.",
-        summarize: "Summarize the webpage, preserving its main arguments, important facts, and key concepts.",
-        ask: `Answer the user's question using the provided webpage as your primary source.\nUser's question: ${question ?? ""}`,
+        explain:
+            "Explain the provided material clearly. Break down difficult concepts and include practical examples where useful.",
+
+        simplify:
+            "Rewrite the provided material in simpler language without losing its important meaning.",
+
+        summarize:
+            "Summarize the entire webpage, preserving its main arguments, important facts, and key concepts.",
+
+        ask:
+            `Answer the user's question using the entire webpage as your primary source.
+User's question: ${question ?? ""}
+If a selected passage is provided, use it as the user's area of focus, but consider the wider webpage context when answering.`,
     };
 
     const contextData = {
@@ -20,6 +39,7 @@ export function buildExplainPrompt(request: AIRequest): string {
         webpageURL: context.url,
         relevantHeadings: context.headings,
         materialToAnalyze: focusedText,
+        selectedPassage: task === "ask" ? selectedText : undefined,
     };
 
     return `
