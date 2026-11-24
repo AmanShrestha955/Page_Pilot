@@ -52,48 +52,106 @@ function validateRequest(request: AIRequest): void {
     }
 }
 
-
 function getErrorCode(error: unknown): AIErrorCode {
     if (error instanceof AIServiceError) {
         return error.code;
     }
 
-    const errorCode =
-        typeof error === "object" &&
-            error !== null &&
-            "code" in error &&
-            typeof error.code === "string"
+    if (typeof error !== "object" || error === null) {
+        return "INFERENCE_FAILED";
+    }
+
+    const sdkCode =
+        "code" in error && typeof error.code === "string"
             ? error.code.toLowerCase()
             : "";
 
     const message =
         error instanceof Error ? error.message.toLowerCase() : "";
 
-    // Classify structured SDK error codes first.
+    const customData =
+        "customErrorData" in error &&
+            typeof error.customErrorData === "object" &&
+            error.customErrorData !== null
+            ? error.customErrorData
+            : null;
+
+    const status =
+        customData &&
+            "status" in customData &&
+            typeof customData.status === "number"
+            ? customData.status
+            : undefined;
+
+    // Firebase project and API configuration failures.
     if (
-        errorCode.includes("resource-exhausted") ||
-        errorCode.includes("too-many-requests")
+        [
+            "api-not-enabled",
+            "no-api-key",
+            "no-app-id",
+            "no-project-id",
+            "no-model",
+        ].includes(sdkCode)
+    ) {
+        return "CONFIGURATION_ERROR";
+    }
+
+    // HTTP status is stronger evidence than a generic SDK error code.
+    if (status === 429) {
+        return "RATE_LIMITED";
+    }
+
+    if (status === 401 || status === 403) {
+        return "AUTHENTICATION_FAILED";
+    }
+
+    if (status !== undefined && status >= 500 && status <= 599) {
+        return "INFERENCE_FAILED";
+    }
+
+    if (status !== undefined && status >= 400 && status <= 499) {
+        return "INFERENCE_FAILED";
+    }
+
+    // Handle structured Firebase errors from other Firebase services.
+    if (
+        sdkCode.includes("resource-exhausted") ||
+        sdkCode.includes("too-many-requests")
     ) {
         return "RATE_LIMITED";
     }
 
     if (
-        errorCode.includes("unauthenticated") ||
-        errorCode.includes("permission-denied") ||
-        errorCode.includes("app-check")
+        sdkCode.includes("unauthenticated") ||
+        sdkCode.includes("permission-denied") ||
+        sdkCode.includes("app-check")
     ) {
         return "AUTHENTICATION_FAILED";
     }
 
     if (
-        errorCode.includes("network") ||
-        errorCode.includes("deadline-exceeded")
+        sdkCode.includes("network") ||
+        sdkCode.includes("deadline-exceeded")
     ) {
         return "NETWORK_ERROR";
     }
 
-    // Fall back to message matching for non-standard errors.
-    if (message.includes("429") || message.includes("resource-exhausted")) {
+    // Recognized Firebase SDK error codes.
+    if (
+        sdkCode === "request-error" ||
+        sdkCode === "response-error" ||
+        sdkCode === "fetch-error" ||
+        sdkCode === "parse-failed"
+    ) {
+        return "INFERENCE_FAILED";
+    }
+
+    // Fallback for non-standard errors without structured status data.
+    if (
+        message.includes("429") ||
+        message.includes("resource-exhausted") ||
+        message.includes("too many requests")
+    ) {
         return "RATE_LIMITED";
     }
 
@@ -106,8 +164,8 @@ function getErrorCode(error: unknown): AIErrorCode {
     }
 
     if (
-        message.includes("network") ||
         message.includes("failed to fetch") ||
+        message.includes("network error") ||
         message.includes("offline")
     ) {
         return "NETWORK_ERROR";
@@ -122,7 +180,6 @@ function getErrorCode(error: unknown): AIErrorCode {
 
     return "INFERENCE_FAILED";
 }
-
 
 export async function explainPage(
     request: AIRequest

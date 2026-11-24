@@ -30,6 +30,22 @@ const createRequest = (
     ...overrides,
 });
 
+const createFirebaseError = (
+    code: string,
+    status?: number,
+    errorDetails?: unknown[]
+) =>
+    Object.assign(new Error("Firebase request failed"), {
+        code,
+        customErrorData:
+            status === undefined && errorDetails === undefined
+                ? undefined
+                : {
+                    status,
+                    errorDetails,
+                },
+    });
+
 describe("explainPage", () => {
     beforeEach(() => {
         vi.resetAllMocks();
@@ -168,7 +184,6 @@ describe("explainPage", () => {
         });
     });
 
-
     it("should classify structured Firebase rate-limit errors", async () => {
         mockedAskGemini.mockRejectedValue(
             Object.assign(new Error("Quota exceeded"), {
@@ -205,7 +220,6 @@ describe("explainPage", () => {
         });
     });
 
-
     it("should classify unknown structured errors as inference failures", async () => {
         mockedAskGemini.mockRejectedValue(
             Object.assign(new Error("Unexpected failure"), {
@@ -215,6 +229,106 @@ describe("explainPage", () => {
 
         await expect(explainPage(createRequest())).rejects.toMatchObject({
             code: "INFERENCE_FAILED",
+        });
+    });
+
+    // Firebase AI Logic customErrorData tests.
+
+    it("should classify HTTP 429 as rate limited", async () => {
+        mockedAskGemini.mockRejectedValue(
+            createFirebaseError("fetch-error", 429)
+        );
+
+        await expect(explainPage(createRequest())).rejects.toMatchObject({
+            code: "RATE_LIMITED",
+        });
+    });
+
+    it("should classify HTTP 401 as authentication failure", async () => {
+        mockedAskGemini.mockRejectedValue(
+            createFirebaseError("fetch-error", 401)
+        );
+
+        await expect(explainPage(createRequest())).rejects.toMatchObject({
+            code: "AUTHENTICATION_FAILED",
+        });
+    });
+
+    it("should classify HTTP 403 as authentication failure", async () => {
+        mockedAskGemini.mockRejectedValue(
+            createFirebaseError("fetch-error", 403)
+        );
+
+        await expect(explainPage(createRequest())).rejects.toMatchObject({
+            code: "AUTHENTICATION_FAILED",
+        });
+    });
+
+    it("should classify HTTP 500 as inference failure", async () => {
+        mockedAskGemini.mockRejectedValue(
+            createFirebaseError("fetch-error", 500)
+        );
+
+        await expect(explainPage(createRequest())).rejects.toMatchObject({
+            code: "INFERENCE_FAILED",
+        });
+    });
+
+    it("should classify api-not-enabled as a configuration error", async () => {
+        mockedAskGemini.mockRejectedValue(
+            createFirebaseError("api-not-enabled")
+        );
+
+        await expect(explainPage(createRequest())).rejects.toMatchObject({
+            code: "CONFIGURATION_ERROR",
+        });
+    });
+
+    it("should classify missing API key as a configuration error", async () => {
+        mockedAskGemini.mockRejectedValue(
+            createFirebaseError("no-api-key")
+        );
+
+        await expect(explainPage(createRequest())).rejects.toMatchObject({
+            code: "CONFIGURATION_ERROR",
+        });
+    });
+
+    it("should not classify fetch-error without HTTP status as a network error", async () => {
+        mockedAskGemini.mockRejectedValue(
+            createFirebaseError("fetch-error")
+        );
+
+        await expect(explainPage(createRequest())).rejects.toMatchObject({
+            code: "INFERENCE_FAILED",
+        });
+    });
+
+    it("should handle malformed custom error data safely", async () => {
+        mockedAskGemini.mockRejectedValue(
+            Object.assign(new Error("Unexpected failure"), {
+                code: "fetch-error",
+                customErrorData: {
+                    status: "429",
+                    errorDetails: "invalid",
+                },
+            })
+        );
+
+        await expect(explainPage(createRequest())).rejects.toMatchObject({
+            code: "INFERENCE_FAILED",
+        });
+    });
+
+    it("should classify generic Firebase fetch errors as network errors", async () => {
+        mockedAskGemini.mockRejectedValue(
+            Object.assign(new Error("Failed to fetch"), {
+                code: "error",
+            })
+        );
+
+        await expect(explainPage(createRequest())).rejects.toMatchObject({
+            code: "NETWORK_ERROR",
         });
     });
 });

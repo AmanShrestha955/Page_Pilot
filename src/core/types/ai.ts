@@ -88,4 +88,5 @@ export type AIErrorCode =
     | "AUTHENTICATION_FAILED"
     | "RATE_LIMITED"
     | "NETWORK_ERROR"
+    | "CONFIGURATION_ERROR"
     | "INFERENCE_FAILED";
