@@ -319,4 +319,16 @@ describe("explainPage", () => {
             code: "INFERENCE_FAILED",
         });
     });
+
+    it("should classify generic Firebase fetch errors as network errors", async () => {
+        mockedAskGemini.mockRejectedValue(
+            Object.assign(new Error("Failed to fetch"), {
+                code: "error",
+            })
+        );
+
+        await expect(explainPage(createRequest())).rejects.toMatchObject({
+            code: "NETWORK_ERROR",
+        });
+    });
 });

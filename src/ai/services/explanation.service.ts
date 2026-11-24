@@ -138,7 +138,6 @@ function getErrorCode(error: unknown): AIErrorCode {
 
     // Recognized Firebase SDK error codes.
     if (
-        sdkCode === "error" ||
         sdkCode === "request-error" ||
         sdkCode === "response-error" ||
         sdkCode === "fetch-error" ||
