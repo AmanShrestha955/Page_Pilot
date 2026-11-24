@@ -1,3 +1,4 @@
+console.log("[PagePilot] content script loaded");
 import { extractPage } from "./extract-page";
 import type { ExtensionMessage, PageContextResponse } from "../messaging/types";
 
