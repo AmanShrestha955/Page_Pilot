@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { usePageContext } from "./hooks/usePageContext";
 import { explainPage } from "../ai/services/explanation.service";
-import type { AIResponse, Difficulty } from "../core/types/ai";
+import type { AIResponse, AITask, Difficulty } from "../core/types/ai";
 import { Segmented } from "./components/common/Segmented";
+import { TaskTabs } from "./components/common/TaskTabs";
 import { AnswerCard } from "./components/chat/AnswerCard";
 
 const LEVELS: { value: Difficulty; label: string }[] = [
@@ -10,6 +11,47 @@ const LEVELS: { value: Difficulty; label: string }[] = [
     { value: "intermediate", label: "Intermediate" },
     { value: "advanced", label: "Expert" },
 ];
+
+const TASKS: Record<
+    AITask,
+    { tab: string; verb: string; working: string; emptyTitle: string; emptyBody: string }
+> = {
+    explain: {
+        tab: "Explain",
+        verb: "Explain",
+        working: "Explaining",
+        emptyTitle: "Highlight a passage to get it explained.",
+        emptyBody:
+            "Leave nothing selected to explain the whole page. Choose a level that matches what you already know.",
+    },
+    simplify: {
+        tab: "Simplify",
+        verb: "Simplify",
+        working: "Simplifying",
+        emptyTitle: "Highlight a hard paragraph to rewrite it in plainer language.",
+        emptyBody: "Leave nothing selected to simplify the whole page.",
+    },
+    summarize: {
+        tab: "Summarize",
+        verb: "Summarize",
+        working: "Summarizing",
+        emptyTitle: "Get the main points of this page.",
+        emptyBody: "Highlight a section to summarize just that part.",
+    },
+    ask: {
+        tab: "Ask",
+        verb: "Ask",
+        working: "Finding the answer",
+        emptyTitle: "Ask a question about this page.",
+        emptyBody:
+            "Type it below. The answer uses the text of the page you're reading.",
+    },
+};
+
+const TAB_LIST = (Object.keys(TASKS) as AITask[]).map((t) => ({
+    value: t,
+    label: TASKS[t].tab,
+}));
 
 // Matches the extraction limit in extract-page.ts
 const EXTRACT_LIMIT = 30000;
@@ -22,13 +64,16 @@ function friendlyError(e: unknown): string {
     if (/network|fetch/i.test(msg)) {
         return "PagePilot couldn't reach the AI service. Check your connection, then try again.";
     }
-    return "Something went wrong while writing the explanation. Try again.";
+    return "Something went wrong. Try again.";
 }
 
 export default function App() {
     const { context, error, loading, refresh } = usePageContext();
 
+    const [task, setTask] = useState<AITask>("explain");
     const [difficulty, setDifficulty] = useState<Difficulty>("intermediate");
+    const [question, setQuestion] = useState("");
+    const [askedQuestion, setAskedQuestion] = useState<string | null>(null);
 
     const [aiResponse, setAiResponse] = useState<AIResponse | null>(null);
     const [aiLoading, setAiLoading] = useState(false);
@@ -36,13 +81,26 @@ export default function App() {
 
     const busy = loading || aiLoading;
     const hasSelection = !!context?.selectedText;
+    const isAsk = task === "ask";
+    const canRun = !busy && (!isAsk || question.trim().length > 0);
 
     // Read the page as soon as the panel opens.
     useEffect(() => {
         void refresh();
     }, [refresh]);
 
-    async function handleExplain() {
+    function selectTask(next: AITask) {
+        if (busy) return;
+        setTask(next);
+        setAiResponse(null);
+        setAiError(null);
+        setAskedQuestion(null);
+    }
+
+    async function handleRun() {
+        const q = question.trim();
+        if (isAsk && !q) return;
+
         setAiLoading(true);
         setAiError(null);
         setAiResponse(null);
@@ -53,27 +111,37 @@ export default function App() {
             if (!pageContext) return;
 
             const response = await explainPage({
-                task: "explain",
+                task,
                 context: pageContext,
                 difficulty,
                 inferenceMode: "auto",
+                ...(isAsk ? { question: q } : {}),
             });
 
+            setAskedQuestion(isAsk ? q : null);
             setAiResponse(response);
         } catch (e) {
-            console.error("PagePilot explanation failed:", e);
+            console.error(`PagePilot ${task} failed:`, e);
             setAiError(friendlyError(e));
         } finally {
             setAiLoading(false);
         }
     }
 
+    const buttonLabel = aiLoading
+        ? TASKS[task].working
+        : isAsk
+            ? "Ask"
+            : `${TASKS[task].verb} ${hasSelection ? "selection" : "page"}`;
+
     return (
         <div className="flex h-screen flex-col bg-canvas text-sm text-ink">
-            <header className="flex items-center gap-2 border-b border-line bg-paper px-4 py-3">
+            <header className="flex items-center gap-2 bg-paper px-4 pb-1 pt-3">
                 <img src="/icon.png" alt="" className="size-6 rounded" />
                 <h1 className="text-[15px] font-semibold tracking-tight">PagePilot</h1>
             </header>
+
+            <TaskTabs value={task} tabs={TAB_LIST} onChange={selectTask} disabled={busy} />
 
             <main className="flex-1 space-y-5 overflow-y-auto px-4 py-4">
                 {/* Current page */}
@@ -118,7 +186,7 @@ export default function App() {
                             </div>
                         ) : (
                             <p className="mt-4 text-xs text-muted">
-                                Nothing selected. PagePilot will explain the whole page.
+                                Nothing selected. PagePilot will use the whole page.
                             </p>
                         )}
                     </section>
@@ -145,17 +213,17 @@ export default function App() {
                     </div>
                 )}
 
-                {/* Explanation failed */}
+                {/* Request failed */}
                 {aiError && (
                     <div
                         role="alert"
                         className="rounded-md border-l-2 border-danger bg-paper p-3 ring-1 ring-line"
                     >
-                        <p className="font-medium">Couldn't get an explanation</p>
+                        <p className="font-medium">Couldn't get a response</p>
                         <p className="mt-1 text-muted">{aiError}</p>
                         <button
-                            onClick={handleExplain}
-                            disabled={busy}
+                            onClick={handleRun}
+                            disabled={!canRun}
                             className="mt-2 text-xs font-medium underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-ink disabled:opacity-50"
                         >
                             Try again
@@ -176,24 +244,54 @@ export default function App() {
                 </div>
 
                 {/* Answer */}
-                {aiResponse && <AnswerCard response={aiResponse} />}
+                {aiResponse && (
+                    <div className="space-y-3">
+                        {askedQuestion && (
+                            <p className="font-serif text-base font-medium leading-snug">
+                                {askedQuestion}
+                            </p>
+                        )}
+                        <AnswerCard response={aiResponse} />
+                    </div>
+                )}
 
                 {/* Empty state */}
                 {!aiResponse && !aiLoading && !aiError && !error && (
                     <div className="space-y-1.5 text-muted">
                         <p className="font-serif text-base text-ink">
-                            Highlight a passage to get it explained.
+                            {TASKS[task].emptyTitle}
                         </p>
-                        <p className="leading-relaxed">
-                            Leave nothing selected to explain the whole page. Choose a level
-                            that matches what you already know.
-                        </p>
+                        <p className="leading-relaxed">{TASKS[task].emptyBody}</p>
                     </div>
                 )}
             </main>
 
-            {/* Controls and primary action */}
+            {/* Input and primary action */}
             <footer className="space-y-3 border-t border-line bg-paper p-3">
+                {isAsk && (
+                    <div>
+                        <label htmlFor="question" className="sr-only">
+                            Your question
+                        </label>
+                        <textarea
+                            id="question"
+                            rows={2}
+                            maxLength={500}
+                            value={question}
+                            onChange={(e) => setQuestion(e.target.value)}
+                            onKeyDown={(e) => {
+                                if (e.key === "Enter" && !e.shiftKey) {
+                                    e.preventDefault();
+                                    if (canRun) void handleRun();
+                                }
+                            }}
+                            disabled={busy}
+                            placeholder="Ask a question about this page"
+                            className="w-full resize-none rounded-lg bg-paper px-3 py-2 text-sm ring-1 ring-line placeholder:text-muted focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ink disabled:opacity-60"
+                        />
+                    </div>
+                )}
+
                 <Segmented
                     label="Level"
                     value={difficulty}
@@ -203,22 +301,18 @@ export default function App() {
                 />
 
                 <button
-                    onClick={handleExplain}
-                    disabled={busy}
+                    onClick={handleRun}
+                    disabled={!canRun}
                     className="flex w-full items-center justify-center gap-2 rounded-lg bg-ink px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-ink/90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink disabled:opacity-60"
                 >
                     {aiLoading && (
                         <span className="size-4 rounded-full border-2 border-white/30 border-t-white motion-safe:animate-spin" />
                     )}
-                    {aiLoading
-                        ? "Writing explanation"
-                        : hasSelection
-                            ? "Explain selection"
-                            : "Explain page"}
+                    {buttonLabel}
                 </button>
 
                 <p className="text-center text-xs text-muted">
-                    The page text is sent to a cloud AI model to write the explanation.
+                    The page text is sent to a cloud AI model to write the response.
                 </p>
             </footer>
         </div>
