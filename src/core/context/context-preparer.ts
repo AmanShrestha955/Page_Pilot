@@ -8,7 +8,12 @@ export function preparePageContext(
     validatePageContext(context);
 
     const cleanContent = context.content
-        .replace(/\s+/g, " ")
+        .replace(/\r\n?/g, "\n")
+        .replace(/[^\S\n]+/g, " ")
+        .split("\n")
+        .map((line) => line.trim())
+        .join("\n")
+        .replace(/\n{3,}/g, "\n\n")
         .trim();
 
     const cleanHeadings = context.headings
