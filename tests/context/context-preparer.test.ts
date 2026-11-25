@@ -18,11 +18,50 @@ const validContext: PageContext = {
 };
 
 describe("preparePageContext", () => {
-    it("should normalize whitespace in page content", () => {
+    it("should normalize whitespace while preserving paragraph boundaries", () => {
         const result = preparePageContext(validContext);
 
         expect(result.content).toBe(
-            "This is an article. It has multiple lines."
+            "This is an article.\n\nIt has multiple lines."
+        );
+    });
+
+    it("should normalize Windows line endings", () => {
+        const context = {
+            ...validContext,
+            content: "First paragraph.\r\n\r\nSecond paragraph.",
+        };
+
+        const result = preparePageContext(context);
+
+        expect(result.content).toBe(
+            "First paragraph.\n\nSecond paragraph."
+        );
+    });
+
+    it("should collapse excessive blank lines", () => {
+        const context = {
+            ...validContext,
+            content: "First paragraph.\n\n\n\nSecond paragraph.",
+        };
+
+        const result = preparePageContext(context);
+
+        expect(result.content).toBe(
+            "First paragraph.\n\nSecond paragraph."
+        );
+    });
+
+    it("should normalize spaces and tabs without removing line breaks", () => {
+        const context = {
+            ...validContext,
+            content: "  First   paragraph.\t\n  Second   paragraph.  ",
+        };
+
+        const result = preparePageContext(context);
+
+        expect(result.content).toBe(
+            "First paragraph.\nSecond paragraph."
         );
     });
 
