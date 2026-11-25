@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { friendlyError } from "./utils/friendly-error";
 import { usePageContext } from "./hooks/usePageContext";
 import { explainPage } from "../ai/services/explanation.service";
 import type { AIResponse, AITask, Difficulty } from "../core/types/ai";
@@ -56,16 +57,6 @@ const TAB_LIST = (Object.keys(TASKS) as AITask[]).map((t) => ({
 // Matches the extraction limit in extract-page.ts
 const EXTRACT_LIMIT = 30000;
 
-function friendlyError(e: unknown): string {
-    const msg = e instanceof Error ? e.message : "";
-    if (/high demand|\[5\d\d\]|\b50[03]\b/.test(msg)) {
-        return "The AI service is busy. Wait a moment, then try again.";
-    }
-    if (/network|fetch/i.test(msg)) {
-        return "PagePilot couldn't reach the AI service. Check your connection, then try again.";
-    }
-    return "Something went wrong. Try again.";
-}
 
 export default function App() {
     const { context, error, loading, refresh } = usePageContext();
