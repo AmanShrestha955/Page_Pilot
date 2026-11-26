@@ -1,11 +1,14 @@
 import { Readability } from "@mozilla/readability";
 import type { PageContext } from "../../core/types/ai";
+import { removeCitationMarkers } from "../../core/utils/clean-text";
 import { truncateAtBoundary } from "../../core/utils/truncate";
 
 const MAX_CHARS = 30000;
 const MAX_SELECTION_CHARS = 5000;
 const MAX_HEADINGS = 40;
 const MIN_ARTICLE_CHARS = 500;
+
+const CITATION_MARKER = /^\s*\[(?:\d{1,3}|[a-z]{1,2}|citation needed)\]\s*$/i;
 
 const BLOCK_SELECTOR =
     "h1,h2,h3,h4,h5,h6,p,li,pre,blockquote,figcaption,dt,dd,tr";
@@ -30,6 +33,9 @@ function clean(text: string): string {
 
 function stripNoise(root: Element): void {
     root.querySelectorAll(NOISE_SELECTOR).forEach((n) => n.remove());
+    root.querySelectorAll("sup").forEach((sup) => {
+        if (CITATION_MARKER.test(sup.textContent ?? "")) sup.remove();
+    });
 }
 
 function collectBlocks(root: Element): Block[] {
@@ -106,7 +112,7 @@ function readBlocks(): { blocks: Block[]; title?: string } {
         document.documentElement.outerHTML,
         "text/html"
     );
-    const article = new Readability(copy).parse();
+    const article = new Readability(copy, { keepClasses: true }).parse();
 
     if (article?.content) {
         const body = new DOMParser().parseFromString(article.content, "text/html").body;
@@ -123,7 +129,7 @@ function readBlocks(): { blocks: Block[]; title?: string } {
 }
 
 function readSelection(): string | undefined {
-    const raw = window.getSelection()?.toString() ?? "";
+    const raw = removeCitationMarkers(window.getSelection()?.toString() ?? "");
     const cleaned = raw
         .replace(/[ \t]+/g, " ")
         .replace(/\n{3,}/g, "\n\n")
