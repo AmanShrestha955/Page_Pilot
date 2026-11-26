@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { friendlyError } from "./utils/friendly-error";
+import { useState } from "react";
+import { friendlyError, isRetryable } from "./utils/friendly-error";
 import { usePageContext } from "./hooks/usePageContext";
 import { usePageWatcher } from "./hooks/usePageWatcher";
 import { explainPage } from "../ai/services/explanation.service";
@@ -63,17 +63,7 @@ interface Outcome {
     question: string | null;
     response?: AIResponse;
     error?: string;
-}
-
-function friendlyError(e: unknown): string {
-    const msg = e instanceof Error ? e.message : "";
-    if (/high demand|\[5\d\d\]|\b50[03]\b/.test(msg)) {
-        return "The AI service is busy. Wait a moment, then try again.";
-    }
-    if (/network|fetch/i.test(msg)) {
-        return "PagePilot couldn't reach the AI service. Check your connection, then try again.";
-    }
-    return "Something went wrong. Try again.";
+    retryable?: boolean;
 }
 
 export default function App() {
@@ -127,7 +117,12 @@ export default function App() {
         } catch (e) {
             console.error(`PagePilot ${task} failed:`, e);
             if (pageUrl) {
-                setOutcome({ url: pageUrl, question: null, error: friendlyError(e) });
+                setOutcome({
+                    url: pageUrl,
+                    question: null,
+                    error: friendlyError(e),
+                    retryable: isRetryable(e),
+                });
             }
         } finally {
             setAiLoading(false);
@@ -220,6 +215,7 @@ export default function App() {
                 )}
 
                 {/* Request failed */}
+                {/* Request failed */}
                 {current?.error && (
                     <div
                         role="alert"
@@ -227,13 +223,15 @@ export default function App() {
                     >
                         <p className="font-medium">Couldn't get a response</p>
                         <p className="mt-1 text-muted">{current.error}</p>
-                        <button
-                            onClick={handleRun}
-                            disabled={!canRun}
-                            className="mt-2 text-xs font-medium underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-ink disabled:opacity-50"
-                        >
-                            Try again
-                        </button>
+                        {current.retryable && (
+                            <button
+                                onClick={handleRun}
+                                disabled={!canRun}
+                                className="mt-2 text-xs font-medium underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-ink disabled:opacity-50"
+                            >
+                                Try again
+                            </button>
+                        )}
                     </div>
                 )}
 
