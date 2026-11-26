@@ -1,5 +1,4 @@
-
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import type { PageContext } from "../../core/types/ai";
 import type { PageContextResponse } from "../../extension/messaging/types";
 
@@ -7,8 +6,10 @@ export function usePageContext() {
     const [context, setContext] = useState<PageContext | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
+    const latest = useRef(0);
 
     const refresh = useCallback(async (): Promise<PageContext | null> => {
+        const id = ++latest.current;
         setLoading(true);
         setError(null);
 
@@ -28,7 +29,7 @@ export function usePageContext() {
             );
 
             if ("context" in res) {
-                setContext(res.context);
+                if (id === latest.current) setContext(res.context);
                 return res.context;
             }
 
@@ -36,14 +37,16 @@ export function usePageContext() {
         } catch (e) {
             console.error("PagePilot extraction failed:", e);
 
-            setContext(null);
-            setError(
-                "PagePilot can't read this page. It may be a browser page, or you may need to refresh the tab."
-            );
+            if (id === latest.current) {
+                setContext(null);
+                setError(
+                    "PagePilot can't read this page. It may be a browser page, or you may need to refresh the tab."
+                );
+            }
 
             return null;
         } finally {
-            setLoading(false);
+            if (id === latest.current) setLoading(false);
         }
     }, []);
 
