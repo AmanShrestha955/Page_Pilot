@@ -3,14 +3,21 @@ import { friendlyError } from "../../src/frontend/utils/friendly-error";
 import type { AIErrorCode } from "../../src/core/types/ai";
 
 const expectedMessages: Record<AIErrorCode, string> = {
-    INVALID_REQUEST: "The request couldn't be processed. Check your input and try again.",
-    NO_PAGE_CONTENT: "PagePilot couldn't find readable webpage content. Refresh the page and try again.",
-    MODEL_UNAVAILABLE: "The selected AI model isn't available right now.",
-    AUTHENTICATION_FAILED: "PagePilot couldn't verify access to the AI service.",
-    RATE_LIMITED: "The AI service is receiving too many requests. Wait a moment, then try again.",
-    NETWORK_ERROR: "PagePilot couldn't reach the AI service. Check your internet connection, then try again.",
-    CONFIGURATION_ERROR: "The AI service isn't configured correctly. Please try again later.",
-    INFERENCE_FAILED: "The AI couldn't generate a response. Please try again.",
+    INVALID_REQUEST:
+        "PagePilot couldn't process that request. Check your input, then try again.",
+    NO_PAGE_CONTENT:
+        "PagePilot couldn't find readable content on this page. Refresh the page, then try again.",
+    MODEL_UNAVAILABLE:
+        "The AI model isn't available right now. Wait a moment, then try again.",
+    AUTHENTICATION_FAILED:
+        "PagePilot couldn't verify access to the AI service. Reload the extension, then try again.",
+    RATE_LIMITED:
+        "The AI service is receiving too many requests. Wait a moment, then try again.",
+    NETWORK_ERROR:
+        "PagePilot couldn't reach the AI service. Check your internet connection, then try again.",
+    CONFIGURATION_ERROR:
+        "PagePilot isn't set up correctly. Check the Firebase settings and try again.",
+    INFERENCE_FAILED: "The AI couldn't write a response. Try again.",
 };
 
 describe("friendlyError", () => {

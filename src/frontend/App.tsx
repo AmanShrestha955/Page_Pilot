@@ -54,8 +54,7 @@ const TAB_LIST = (Object.keys(TASKS) as AITask[]).map((t) => ({
     label: TASKS[t].tab,
 }));
 
-// Matches the extraction limit in extract-page.ts
-const EXTRACT_LIMIT = 30000;
+
 
 // A result belongs to the page it was produced for.
 interface Outcome {
@@ -162,15 +161,21 @@ export default function App() {
                         <h2 className="mt-1 line-clamp-3 font-serif text-lg font-medium leading-snug">
                             {context.title}
                         </h2>
+
                         <p className="mt-1 text-xs text-muted">
                             {context.headings.length} sections,{" "}
                             {context.content.length.toLocaleString()} characters read
                         </p>
 
-                        {context.content.length >= EXTRACT_LIMIT && (
+                        {context.truncated && (
                             <p className="mt-2 text-xs text-warn">
-                                Long page. PagePilot reads the first{" "}
-                                {EXTRACT_LIMIT.toLocaleString()} characters.
+                                Long page. PagePilot read the first{" "}
+                                {context.content.length.toLocaleString()} characters.
+                            </p>
+                        )}
+                        {context.content.length < 300 && (
+                            <p className="mt-2 text-xs text-warn">
+                                PagePilot found very little text on this page. Answers may be limited.
                             </p>
                         )}
 
@@ -214,7 +219,6 @@ export default function App() {
                     </div>
                 )}
 
-                {/* Request failed */}
                 {/* Request failed */}
                 {current?.error && (
                     <div

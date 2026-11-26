@@ -29,6 +29,19 @@ export function usePageContext() {
             );
 
             if ("context" in res) {
+                const c = res.context;
+                console.log("[PagePilot] summary", {
+                    title: c.title,
+                    headings: c.headings,
+                    characters: c.content.length,
+                    truncated: c.truncated,
+                    selectionLength: c.selectedText?.length ?? 0,
+                });
+                console.log("[PagePilot] first 1500 characters:\n" + c.content.slice(0, 1500));
+                console.log("[PagePilot] last 300 characters:\n" + c.content.slice(-300));
+                if (c.selectedText) {
+                    console.log("[PagePilot] selection end:\n" + c.selectedText.slice(-200));
+                }
                 if (id === latest.current) setContext(res.context);
                 return res.context;
             }
