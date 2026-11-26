@@ -41,6 +41,7 @@ export interface PageContext {
     content: string;
     selectedText?: string;
     extractedAt: number;
+    truncated?: boolean;
 }
 
 /**
