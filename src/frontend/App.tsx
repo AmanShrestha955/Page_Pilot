@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { friendlyError } from "./utils/friendly-error";
 import { usePageContext } from "./hooks/usePageContext";
 import { usePageWatcher } from "./hooks/usePageWatcher";
 import { explainPage } from "../ai/services/explanation.service";
