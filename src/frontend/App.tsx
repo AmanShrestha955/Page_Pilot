@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { usePageContext } from "./hooks/usePageContext";
+import { usePageWatcher } from "./hooks/usePageWatcher";
 import { explainPage } from "../ai/services/explanation.service";
 import type { AIResponse, AITask, Difficulty } from "../core/types/ai";
 import { Segmented } from "./components/common/Segmented";
@@ -43,8 +44,7 @@ const TASKS: Record<
         verb: "Ask",
         working: "Finding the answer",
         emptyTitle: "Ask a question about this page.",
-        emptyBody:
-            "Type it below. The answer uses the text of the page you're reading.",
+        emptyBody: "Type it below. The answer uses the text of the page you're reading.",
     },
 };
 
@@ -55,6 +55,14 @@ const TAB_LIST = (Object.keys(TASKS) as AITask[]).map((t) => ({
 
 // Matches the extraction limit in extract-page.ts
 const EXTRACT_LIMIT = 30000;
+
+// A result belongs to the page it was produced for.
+interface Outcome {
+    url: string;
+    question: string | null;
+    response?: AIResponse;
+    error?: string;
+}
 
 function friendlyError(e: unknown): string {
     const msg = e instanceof Error ? e.message : "";
@@ -69,32 +77,27 @@ function friendlyError(e: unknown): string {
 
 export default function App() {
     const { context, error, loading, refresh } = usePageContext();
+    usePageWatcher(refresh);
 
     const [task, setTask] = useState<AITask>("explain");
     const [difficulty, setDifficulty] = useState<Difficulty>("intermediate");
     const [question, setQuestion] = useState("");
-    const [askedQuestion, setAskedQuestion] = useState<string | null>(null);
 
-    const [aiResponse, setAiResponse] = useState<AIResponse | null>(null);
+    const [outcome, setOutcome] = useState<Outcome | null>(null);
     const [aiLoading, setAiLoading] = useState(false);
-    const [aiError, setAiError] = useState<string | null>(null);
+
+    // Only show a result while the user is still on the page it was made for.
+    const current = outcome && outcome.url === context?.url ? outcome : null;
 
     const busy = loading || aiLoading;
     const hasSelection = !!context?.selectedText;
     const isAsk = task === "ask";
     const canRun = !busy && (!isAsk || question.trim().length > 0);
 
-    // Read the page as soon as the panel opens.
-    useEffect(() => {
-        void refresh();
-    }, [refresh]);
-
     function selectTask(next: AITask) {
         if (busy) return;
         setTask(next);
-        setAiResponse(null);
-        setAiError(null);
-        setAskedQuestion(null);
+        setOutcome(null);
     }
 
     async function handleRun() {
@@ -102,13 +105,14 @@ export default function App() {
         if (isAsk && !q) return;
 
         setAiLoading(true);
-        setAiError(null);
-        setAiResponse(null);
+        setOutcome(null);
+        let pageUrl: string | null = null;
 
         try {
             // Re-read so the latest selection is included.
             const pageContext = await refresh();
             if (!pageContext) return;
+            pageUrl = pageContext.url;
 
             const response = await explainPage({
                 task,
@@ -118,11 +122,12 @@ export default function App() {
                 ...(isAsk ? { question: q } : {}),
             });
 
-            setAskedQuestion(isAsk ? q : null);
-            setAiResponse(response);
+            setOutcome({ url: pageUrl, question: isAsk ? q : null, response });
         } catch (e) {
             console.error(`PagePilot ${task} failed:`, e);
-            setAiError(friendlyError(e));
+            if (pageUrl) {
+                setOutcome({ url: pageUrl, question: null, error: friendlyError(e) });
+            }
         } finally {
             setAiLoading(false);
         }
@@ -214,13 +219,13 @@ export default function App() {
                 )}
 
                 {/* Request failed */}
-                {aiError && (
+                {current?.error && (
                     <div
                         role="alert"
                         className="rounded-md border-l-2 border-danger bg-paper p-3 ring-1 ring-line"
                     >
                         <p className="font-medium">Couldn't get a response</p>
-                        <p className="mt-1 text-muted">{aiError}</p>
+                        <p className="mt-1 text-muted">{current.error}</p>
                         <button
                             onClick={handleRun}
                             disabled={!canRun}
@@ -244,19 +249,19 @@ export default function App() {
                 </div>
 
                 {/* Answer */}
-                {aiResponse && (
+                {current?.response && (
                     <div className="space-y-3">
-                        {askedQuestion && (
+                        {current.question && (
                             <p className="font-serif text-base font-medium leading-snug">
-                                {askedQuestion}
+                                {current.question}
                             </p>
                         )}
-                        <AnswerCard response={aiResponse} />
+                        <AnswerCard response={current.response} />
                     </div>
                 )}
 
                 {/* Empty state */}
-                {!aiResponse && !aiLoading && !aiError && !error && (
+                {!current && !aiLoading && !error && (
                     <div className="space-y-1.5 text-muted">
                         <p className="font-serif text-base text-ink">
                             {TASKS[task].emptyTitle}
