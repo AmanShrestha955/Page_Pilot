@@ -99,6 +99,7 @@ describe("preparePageContext", () => {
             preparePageContext({
                 ...validContext,
                 content: "   ",
+                selectedText: undefined,
             })
         ).toThrow("No usable page content found.");
     });

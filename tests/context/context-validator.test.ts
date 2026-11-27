@@ -25,14 +25,32 @@ describe("validatePageContext", () => {
 
     it("should reject empty page content", () => {
         expect(() =>
-            validatePageContext({ ...validContext, content: "" })
+            validatePageContext({
+                ...validContext,
+                content: "",
+                selectedText: undefined,
+            })
         ).toThrow("No usable page content found.");
     });
 
     it("should reject whitespace-only content", () => {
         expect(() =>
-            validatePageContext({ ...validContext, content: "   \n  " })
+            validatePageContext({
+                ...validContext,
+                content: "   \n  ",
+                selectedText: undefined,
+            })
         ).toThrow("No usable page content found.");
+    });
+
+    it("should accept selected text without full page content", () => {
+        expect(() =>
+            validatePageContext({
+                ...validContext,
+                content: "",
+                selectedText: "A selected passage.",
+            })
+        ).not.toThrow();
     });
 
     it("should reject a missing context", () => {
@@ -40,7 +58,6 @@ describe("validatePageContext", () => {
             validatePageContext(null as unknown as PageContext)
         ).toThrow("Page context is missing.");
     });
-
 
     it("should reject malformed URLs", () => {
         expect(() =>
@@ -56,5 +73,4 @@ describe("validatePageContext", () => {
             })
         ).toThrow("Invalid page URL.");
     });
-
 });

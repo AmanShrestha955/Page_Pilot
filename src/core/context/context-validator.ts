@@ -6,7 +6,6 @@ export function validatePageContext(context: PageContext): void {
         throw new Error("Page context is missing.");
     }
 
-
     if (typeof context.url !== "string" || !context.url.trim()) {
         throw new Error("Page URL is missing.");
     }
@@ -21,8 +20,15 @@ export function validatePageContext(context: PageContext): void {
         throw new Error("Invalid page URL.");
     }
 
+    const hasPageContent =
+        typeof context.content === "string" &&
+        Boolean(context.content.trim());
 
-    if (typeof context.content !== "string" || !context.content.trim()) {
+    const hasSelectedText =
+        typeof context.selectedText === "string" &&
+        Boolean(context.selectedText.trim());
+
+    if (!hasPageContent && !hasSelectedText) {
         throw new Error("No usable page content found.");
     }
 }

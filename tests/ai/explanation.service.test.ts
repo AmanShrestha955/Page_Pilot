@@ -1,16 +1,16 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { explainPage } from "../../src/ai/services/explanation.service";
-import { askGemini } from "../../src/ai/models/gemini";
+import { generateHybridGemini } from "../../src/ai/models/gemini";
 import type { AIRequest, PageContext } from "../../src/core/types/ai";
 
 // Replace the real Gemini integration with a mock.
 // These tests will never make actual API requests.
 vi.mock("../../src/ai/models/gemini", () => ({
-    askGemini: vi.fn(),
+    generateHybridGemini: vi.fn(),
 }));
 
-const mockedAskGemini = vi.mocked(askGemini);
+const mockedGenerateHybridGemini = vi.mocked(generateHybridGemini);
 
 const validContext: PageContext = {
     url: "https://example.com/article",
@@ -49,12 +49,18 @@ const createFirebaseError = (
 describe("explainPage", () => {
     beforeEach(() => {
         vi.resetAllMocks();
+
+        mockedGenerateHybridGemini.mockResolvedValue({
+            text: "Supervised learning uses labeled examples.",
+            source: "cloud",
+        });
     });
 
-    it("should return a successful cloud response", async () => {
-        mockedAskGemini.mockResolvedValue(
-            "Supervised learning uses labeled examples."
-        );
+    it("should return a successful on-device response", async () => {
+        mockedGenerateHybridGemini.mockResolvedValue({
+            text: "Supervised learning uses labeled examples.",
+            source: "on-device",
+        });
 
         const response = await explainPage(createRequest());
 
@@ -62,10 +68,28 @@ describe("explainPage", () => {
             "Supervised learning uses labeled examples."
         );
         expect(response.task).toBe("explain");
-        expect(response.inference.source).toBe("cloud");
+        expect(response.inference.source).toBe("on-device");
         expect(response.inference.requestedMode).toBe("auto");
         expect(response.inference.fallbackUsed).toBe(false);
-        expect(mockedAskGemini).toHaveBeenCalledOnce();
+
+        expect(mockedGenerateHybridGemini).toHaveBeenCalledOnce();
+        expect(mockedGenerateHybridGemini).toHaveBeenCalledWith(
+            expect.any(String),
+            "auto"
+        );
+    });
+
+    it("should report cloud fallback when auto inference returns cloud", async () => {
+        mockedGenerateHybridGemini.mockResolvedValue({
+            text: "Cloud-generated explanation.",
+            source: "cloud",
+        });
+
+        const response = await explainPage(createRequest());
+
+        expect(response.inference.source).toBe("cloud");
+        expect(response.inference.requestedMode).toBe("auto");
+        expect(response.inference.fallbackUsed).toBe(true);
     });
 
     it("should reject a missing page context", async () => {
@@ -77,7 +101,7 @@ describe("explainPage", () => {
             code: "INVALID_REQUEST",
         });
 
-        expect(mockedAskGemini).not.toHaveBeenCalled();
+        expect(mockedGenerateHybridGemini).not.toHaveBeenCalled();
     });
 
     it("should reject summarization without page content", async () => {
@@ -94,7 +118,7 @@ describe("explainPage", () => {
             code: "NO_PAGE_CONTENT",
         });
 
-        expect(mockedAskGemini).not.toHaveBeenCalled();
+        expect(mockedGenerateHybridGemini).not.toHaveBeenCalled();
     });
 
     it("should reject requests without usable content", async () => {
@@ -109,6 +133,8 @@ describe("explainPage", () => {
         await expect(explainPage(request)).rejects.toMatchObject({
             code: "NO_PAGE_CONTENT",
         });
+
+        expect(mockedGenerateHybridGemini).not.toHaveBeenCalled();
     });
 
     it("should reject an empty Ask question", async () => {
@@ -121,23 +147,155 @@ describe("explainPage", () => {
             code: "INVALID_REQUEST",
         });
 
-        expect(mockedAskGemini).not.toHaveBeenCalled();
+        expect(mockedGenerateHybridGemini).not.toHaveBeenCalled();
     });
 
-    it("should reject on-device inference when it is not implemented", async () => {
+    it("should support strict on-device inference", async () => {
+        mockedGenerateHybridGemini.mockResolvedValue({
+            text: "Supervised learning uses labeled examples.",
+            source: "on-device",
+        });
+
+        const response = await explainPage(
+            createRequest({ inferenceMode: "on-device" })
+        );
+
+        expect(response.inference.source).toBe("on-device");
+        expect(response.inference.requestedMode).toBe("on-device");
+        expect(response.inference.fallbackUsed).toBe(false);
+
+        expect(mockedGenerateHybridGemini).toHaveBeenCalledWith(
+            expect.any(String),
+            "on-device"
+        );
+    });
+
+    it("should support cloud-only inference", async () => {
+        const response = await explainPage(
+            createRequest({ inferenceMode: "cloud" })
+        );
+
+        expect(response.inference.source).toBe("cloud");
+        expect(response.inference.requestedMode).toBe("cloud");
+        expect(response.inference.fallbackUsed).toBe(false);
+
+        expect(mockedGenerateHybridGemini).toHaveBeenCalledWith(
+            expect.any(String),
+            "cloud"
+        );
+    });
+
+    it("should route oversized auto-mode prompts directly to cloud", async () => {
+        const request = createRequest({
+            context: {
+                ...validContext,
+                content: "Machine learning ".repeat(600),
+                selectedText: undefined,
+            },
+        });
+
+        const response = await explainPage(request);
+
+        expect(mockedGenerateHybridGemini).toHaveBeenCalledWith(
+            expect.any(String),
+            "cloud"
+        );
+
+        expect(response.inference.source).toBe("cloud");
+        expect(response.inference.fallbackUsed).toBe(false);
+    });
+
+    it("should route incomplete full-page auto requests directly to cloud", async () => {
+        const request = createRequest({
+            context: {
+                ...validContext,
+                selectedText: undefined,
+                truncated: true,
+            },
+        });
+
+        const response = await explainPage(request);
+
+        expect(mockedGenerateHybridGemini).toHaveBeenCalledWith(
+            expect.any(String),
+            "cloud"
+        );
+
+        expect(response.inference.source).toBe("cloud");
+        expect(response.inference.fallbackUsed).toBe(false);
+
+        const prompt = mockedGenerateHybridGemini.mock.calls[0][0];
+
+        expect(prompt).toContain("INCOMPLETE WEBPAGE EXTRACTION");
+    });
+
+    it("should reject oversized prompts in strict on-device mode", async () => {
         const request = createRequest({
             inferenceMode: "on-device",
+            context: {
+                ...validContext,
+                content: "Machine learning ".repeat(600),
+                selectedText: undefined,
+            },
         });
 
         await expect(explainPage(request)).rejects.toMatchObject({
-            code: "MODEL_UNAVAILABLE",
+            code: "CONTEXT_TOO_LARGE",
         });
 
-        expect(mockedAskGemini).not.toHaveBeenCalled();
+        expect(mockedGenerateHybridGemini).not.toHaveBeenCalled();
+    });
+
+    it("should reject incomplete full-page context in strict on-device mode", async () => {
+        const request = createRequest({
+            inferenceMode: "on-device",
+            context: {
+                ...validContext,
+                selectedText: undefined,
+                truncated: true,
+            },
+        });
+
+        await expect(explainPage(request)).rejects.toMatchObject({
+            code: "INCOMPLETE_CONTEXT",
+        });
+
+        expect(mockedGenerateHybridGemini).not.toHaveBeenCalled();
+    });
+
+    it("should allow on-device explanation of selected text from a truncated page", async () => {
+        mockedGenerateHybridGemini.mockResolvedValue({
+            text: "The selected passage explains supervised learning.",
+            source: "on-device",
+        });
+
+        const request = createRequest({
+            context: {
+                ...validContext,
+                truncated: true,
+                selectedText: "Supervised learning uses labeled data.",
+            },
+        });
+
+        const response = await explainPage(request);
+
+        expect(response.inference.source).toBe("on-device");
+
+        expect(mockedGenerateHybridGemini).toHaveBeenCalledWith(
+            expect.any(String),
+            "auto"
+        );
+
+        const prompt = mockedGenerateHybridGemini.mock.calls[0][0];
+
+        expect(prompt).not.toContain("INCOMPLETE WEBPAGE EXTRACTION");
     });
 
     it("should reject an empty Gemini response", async () => {
-        mockedAskGemini.mockResolvedValue("   ");
+        mockedGenerateHybridGemini.mockResolvedValue({
+            text: "   ",
+            source: "on-device",
+        });
 
         await expect(explainPage(createRequest())).rejects.toMatchObject({
             code: "INFERENCE_FAILED",
@@ -145,7 +303,7 @@ describe("explainPage", () => {
     });
 
     it("should classify rate limit errors", async () => {
-        mockedAskGemini.mockRejectedValue(
+        mockedGenerateHybridGemini.mockRejectedValue(
             new Error("429 resource-exhausted")
         );
 
@@ -155,7 +313,7 @@ describe("explainPage", () => {
     });
 
     it("should classify authentication errors", async () => {
-        mockedAskGemini.mockRejectedValue(
+        mockedGenerateHybridGemini.mockRejectedValue(
             new Error("permission-denied")
         );
 
@@ -165,7 +323,7 @@ describe("explainPage", () => {
     });
 
     it("should classify network errors", async () => {
-        mockedAskGemini.mockRejectedValue(
+        mockedGenerateHybridGemini.mockRejectedValue(
             new Error("Failed to fetch")
         );
 
@@ -175,7 +333,7 @@ describe("explainPage", () => {
     });
 
     it("should classify unavailable model errors", async () => {
-        mockedAskGemini.mockRejectedValue(
+        mockedGenerateHybridGemini.mockRejectedValue(
             new Error("Model unavailable")
         );
 
@@ -185,7 +343,7 @@ describe("explainPage", () => {
     });
 
     it("should classify structured Firebase rate-limit errors", async () => {
-        mockedAskGemini.mockRejectedValue(
+        mockedGenerateHybridGemini.mockRejectedValue(
             Object.assign(new Error("Quota exceeded"), {
                 code: "functions/resource-exhausted",
             })
@@ -197,7 +355,7 @@ describe("explainPage", () => {
     });
 
     it("should classify structured Firebase authentication errors", async () => {
-        mockedAskGemini.mockRejectedValue(
+        mockedGenerateHybridGemini.mockRejectedValue(
             Object.assign(new Error("Access denied"), {
                 code: "permission-denied",
             })
@@ -209,7 +367,7 @@ describe("explainPage", () => {
     });
 
     it("should classify structured network errors", async () => {
-        mockedAskGemini.mockRejectedValue(
+        mockedGenerateHybridGemini.mockRejectedValue(
             Object.assign(new Error("Request timed out"), {
                 code: "deadline-exceeded",
             })
@@ -221,7 +379,7 @@ describe("explainPage", () => {
     });
 
     it("should classify unknown structured errors as inference failures", async () => {
-        mockedAskGemini.mockRejectedValue(
+        mockedGenerateHybridGemini.mockRejectedValue(
             Object.assign(new Error("Unexpected failure"), {
                 code: "unknown-error",
             })
@@ -235,7 +393,7 @@ describe("explainPage", () => {
     // Firebase AI Logic customErrorData tests.
 
     it("should classify HTTP 429 as rate limited", async () => {
-        mockedAskGemini.mockRejectedValue(
+        mockedGenerateHybridGemini.mockRejectedValue(
             createFirebaseError("fetch-error", 429)
         );
 
@@ -245,7 +403,7 @@ describe("explainPage", () => {
     });
 
     it("should classify HTTP 401 as authentication failure", async () => {
-        mockedAskGemini.mockRejectedValue(
+        mockedGenerateHybridGemini.mockRejectedValue(
             createFirebaseError("fetch-error", 401)
         );
 
@@ -255,7 +413,7 @@ describe("explainPage", () => {
     });
 
     it("should classify HTTP 403 as authentication failure", async () => {
-        mockedAskGemini.mockRejectedValue(
+        mockedGenerateHybridGemini.mockRejectedValue(
             createFirebaseError("fetch-error", 403)
         );
 
@@ -265,7 +423,7 @@ describe("explainPage", () => {
     });
 
     it("should classify HTTP 500 as inference failure", async () => {
-        mockedAskGemini.mockRejectedValue(
+        mockedGenerateHybridGemini.mockRejectedValue(
             createFirebaseError("fetch-error", 500)
         );
 
@@ -275,7 +433,7 @@ describe("explainPage", () => {
     });
 
     it("should classify api-not-enabled as a configuration error", async () => {
-        mockedAskGemini.mockRejectedValue(
+        mockedGenerateHybridGemini.mockRejectedValue(
             createFirebaseError("api-not-enabled")
         );
 
@@ -285,7 +443,7 @@ describe("explainPage", () => {
     });
 
     it("should classify missing API key as a configuration error", async () => {
-        mockedAskGemini.mockRejectedValue(
+        mockedGenerateHybridGemini.mockRejectedValue(
             createFirebaseError("no-api-key")
         );
 
@@ -295,7 +453,7 @@ describe("explainPage", () => {
     });
 
     it("should not classify fetch-error without HTTP status as a network error", async () => {
-        mockedAskGemini.mockRejectedValue(
+        mockedGenerateHybridGemini.mockRejectedValue(
             createFirebaseError("fetch-error")
         );
 
@@ -305,7 +463,7 @@ describe("explainPage", () => {
     });
 
     it("should handle malformed custom error data safely", async () => {
-        mockedAskGemini.mockRejectedValue(
+        mockedGenerateHybridGemini.mockRejectedValue(
             Object.assign(new Error("Unexpected failure"), {
                 code: "fetch-error",
                 customErrorData: {
@@ -321,7 +479,7 @@ describe("explainPage", () => {
     });
 
     it("should classify generic Firebase fetch errors as network errors", async () => {
-        mockedAskGemini.mockRejectedValue(
+        mockedGenerateHybridGemini.mockRejectedValue(
             Object.assign(new Error("Failed to fetch"), {
                 code: "error",
             })

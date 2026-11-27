@@ -121,4 +121,59 @@ describe("buildExplainPrompt", () => {
             `"materialToAnalyze": "${mockContext.content}"`
         );
     });
+
+
+    it("should disclose incomplete extraction for summarization", () => {
+        const prompt = buildExplainPrompt({
+            task: "summarize",
+            context: {
+                ...mockContext,
+                truncated: true,
+            },
+        });
+
+        expect(prompt).toContain("INCOMPLETE WEBPAGE EXTRACTION");
+        expect(prompt).toContain(
+            "Do not claim that you analyzed or summarized the entire original webpage"
+        );
+    });
+
+    it("should disclose incomplete extraction for Ask", () => {
+        const prompt = buildExplainPrompt({
+            task: "ask",
+            context: {
+                ...mockContext,
+                truncated: true,
+            },
+            question: "What is supervised learning?",
+        });
+
+        expect(prompt).toContain("INCOMPLETE WEBPAGE EXTRACTION");
+    });
+
+    it("should not disclose incomplete extraction when explaining selected text", () => {
+        const prompt = buildExplainPrompt({
+            task: "explain",
+            context: {
+                ...mockContext,
+                truncated: true,
+            },
+        });
+
+        expect(prompt).not.toContain("INCOMPLETE WEBPAGE EXTRACTION");
+        expect(prompt).toContain(mockContext.selectedText);
+    });
+
+    it("should disclose incomplete extraction when explaining the full page", () => {
+        const prompt = buildExplainPrompt({
+            task: "explain",
+            context: {
+                ...mockContext,
+                selectedText: undefined,
+                truncated: true,
+            },
+        });
+
+        expect(prompt).toContain("INCOMPLETE WEBPAGE EXTRACTION");
+    });
 });
