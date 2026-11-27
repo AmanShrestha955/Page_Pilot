@@ -1,5 +1,9 @@
-import { askGemini } from "../models/gemini";
+
+import { generateHybridGemini } from "../models/gemini";
 import { buildExplainPrompt } from "../prompts/explain.prompt";
+
+import { preparePageContext } from "../../core/context/context-preparer";
+import { assessContextBudget } from "../../core/context/context-budget";
 
 import type {
     AIRequest,
@@ -30,14 +34,24 @@ function validateRequest(request: AIRequest): void {
     const hasSelectedText = Boolean(request.context.selectedText?.trim());
     const hasPageContent = Boolean(request.context.content?.trim());
 
-    if (request.task === "summarize" && !hasPageContent) {
+    // Summarization and Ask require the wider webpage context.
+    if (
+        (request.task === "summarize" || request.task === "ask") &&
+        !hasPageContent
+    ) {
         throw new AIServiceError(
             "NO_PAGE_CONTENT",
-            "There is no webpage content available to summarize."
+            "Full webpage content is required for this task."
         );
     }
 
-    if (request.task !== "summarize" && !hasSelectedText && !hasPageContent) {
+    // Explain and simplify can operate on selected text alone.
+    if (
+        request.task !== "summarize" &&
+        request.task !== "ask" &&
+        !hasSelectedText &&
+        !hasPageContent
+    ) {
         throw new AIServiceError(
             "NO_PAGE_CONTENT",
             "There is no webpage content available to analyze."
@@ -50,6 +64,20 @@ function validateRequest(request: AIRequest): void {
             "A question is required for the ask task."
         );
     }
+}
+
+/**
+ * Determines whether the requested task depends on the full extracted page.
+ *
+ * Explain and simplify can use a selected passage as their complete target.
+ * Summarize and ask always need the wider page context.
+ */
+function requiresFullPageContext(request: AIRequest): boolean {
+    if (request.task === "summarize" || request.task === "ask") {
+        return true;
+    }
+
+    return !request.context.selectedText?.trim();
 }
 
 function getErrorCode(error: unknown): AIErrorCode {
@@ -83,7 +111,6 @@ function getErrorCode(error: unknown): AIErrorCode {
             ? customData.status
             : undefined;
 
-    // Firebase project and API configuration failures.
     if (
         [
             "api-not-enabled",
@@ -96,7 +123,6 @@ function getErrorCode(error: unknown): AIErrorCode {
         return "CONFIGURATION_ERROR";
     }
 
-    // HTTP status is stronger evidence than a generic SDK error code.
     if (status === 429) {
         return "RATE_LIMITED";
     }
@@ -113,7 +139,6 @@ function getErrorCode(error: unknown): AIErrorCode {
         return "INFERENCE_FAILED";
     }
 
-    // Handle structured Firebase errors from other Firebase services.
     if (
         sdkCode.includes("resource-exhausted") ||
         sdkCode.includes("too-many-requests")
@@ -136,7 +161,6 @@ function getErrorCode(error: unknown): AIErrorCode {
         return "NETWORK_ERROR";
     }
 
-    // Recognized Firebase SDK error codes.
     if (
         sdkCode === "request-error" ||
         sdkCode === "response-error" ||
@@ -146,7 +170,6 @@ function getErrorCode(error: unknown): AIErrorCode {
         return "INFERENCE_FAILED";
     }
 
-    // Fallback for non-standard errors without structured status data.
     if (
         message.includes("429") ||
         message.includes("resource-exhausted") ||
@@ -188,31 +211,111 @@ export async function explainPage(
 
     const requestedMode: InferenceMode = request.inferenceMode ?? "auto";
 
-    if (requestedMode === "on-device") {
-        throw new AIServiceError(
-            "MODEL_UNAVAILABLE",
-            "On-device inference has not been implemented yet."
-        );
-    }
-
     try {
-        const prompt = buildExplainPrompt(request);
-        const answer = await askGemini(prompt);
+        // Normalize and validate extracted context before constructing prompts.
+        let preparedContext;
 
-        if (!answer.trim()) {
+        try {
+            preparedContext = preparePageContext(request.context);
+        } catch (error) {
+            throw new AIServiceError(
+                "INVALID_REQUEST",
+                error instanceof Error
+                    ? error.message
+                    : "Invalid page context."
+            );
+        }
+
+        const preparedRequest: AIRequest = {
+            ...request,
+            context: preparedContext,
+        };
+
+        const prompt = buildExplainPrompt(preparedRequest);
+
+        const requiresFullPage = requiresFullPageContext(preparedRequest);
+
+        const incompleteContext =
+            requiresFullPage && preparedContext.truncated === true;
+
+        const budget = assessContextBudget(prompt);
+
+        let effectiveMode: InferenceMode = requestedMode;
+
+        // Strict on-device mode must never silently use cloud inference.
+        if (requestedMode === "on-device") {
+            if (incompleteContext) {
+                throw new AIServiceError(
+                    "INCOMPLETE_CONTEXT",
+                    "The webpage extraction is incomplete. Strict on-device inference requires complete extracted context for this task."
+                );
+            }
+
+            if (!budget.fitsOnDevice) {
+                throw new AIServiceError(
+                    "CONTEXT_TOO_LARGE",
+                    `The prompt contains ${budget.characterCount} characters, exceeding the provisional on-device budget of ${budget.maxCharacters} characters.`
+                );
+            }
+        }
+
+        // Automatic routing: use cloud directly when local inference is
+        // unsuitable because of prompt size or incomplete full-page extraction.
+        if (requestedMode === "auto") {
+            if (incompleteContext || !budget.fitsOnDevice) {
+                effectiveMode = "cloud";
+            } else {
+                effectiveMode = "auto";
+            }
+        }
+
+        const result = await generateHybridGemini(
+            prompt,
+            effectiveMode
+        );
+
+        if (!result.text.trim()) {
             throw new AIServiceError(
                 "INFERENCE_FAILED",
                 "The AI model returned an empty response."
             );
         }
 
+        // Defensive checks: strict modes must honor their requested source.
+        if (
+            requestedMode === "on-device" &&
+            result.source !== "on-device"
+        ) {
+            throw new AIServiceError(
+                "MODEL_UNAVAILABLE",
+                "Strict on-device inference did not return an on-device result."
+            );
+        }
+
+        if (
+            requestedMode === "cloud" &&
+            result.source !== "cloud"
+        ) {
+            throw new AIServiceError(
+                "INFERENCE_FAILED",
+                "Cloud-only inference returned an unexpected inference source."
+            );
+        }
+
+        // Only count SDK-managed fallback when auto mode was actually
+        // requested from the SDK. Direct cloud routing is not fallback.
+        const fallbackUsed =
+            requestedMode === "auto" &&
+            effectiveMode === "auto" &&
+            result.source === "cloud";
+
         return {
-            answer,
+            answer: result.text,
             task: request.task,
             inference: {
-                source: "cloud",
+                source: result.source,
                 requestedMode,
-                fallbackUsed: false,
+                fallbackUsed,
             },
         };
     } catch (error) {
