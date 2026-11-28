@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { friendlyError, isRetryable } from "./utils/friendly-error";
+import { canSwitchToAuto, friendlyError, isRetryable } from "./utils/friendly-error";
+import { privacyNote } from "./utils/privacy-note";
 import { usePageContext } from "./hooks/usePageContext";
 import { usePageWatcher } from "./hooks/usePageWatcher";
 import { explainPage } from "../ai/services/explanation.service";
-import type { AIResponse, AITask, Difficulty } from "../core/types/ai";
+import type { AIResponse, AITask, Difficulty, InferenceMode } from "../core/types/ai";
 import { Segmented } from "./components/common/Segmented";
 import { TaskTabs } from "./components/common/TaskTabs";
 import { AnswerCard } from "./components/chat/AnswerCard";
@@ -12,6 +13,12 @@ const LEVELS: { value: Difficulty; label: string }[] = [
     { value: "beginner", label: "Beginner" },
     { value: "intermediate", label: "Intermediate" },
     { value: "advanced", label: "Expert" },
+];
+
+const MODES: { value: InferenceMode; label: string }[] = [
+    { value: "auto", label: "Auto" },
+    { value: "on-device", label: "On device" },
+    { value: "cloud", label: "Cloud" },
 ];
 
 const TASKS: Record<
@@ -54,8 +61,6 @@ const TAB_LIST = (Object.keys(TASKS) as AITask[]).map((t) => ({
     label: TASKS[t].tab,
 }));
 
-
-
 // A result belongs to the page it was produced for.
 interface Outcome {
     url: string;
@@ -63,6 +68,7 @@ interface Outcome {
     response?: AIResponse;
     error?: string;
     retryable?: boolean;
+    offerAuto?: boolean;
 }
 
 export default function App() {
@@ -71,6 +77,7 @@ export default function App() {
 
     const [task, setTask] = useState<AITask>("explain");
     const [difficulty, setDifficulty] = useState<Difficulty>("intermediate");
+    const [mode, setMode] = useState<InferenceMode>("auto");
     const [question, setQuestion] = useState("");
 
     const [outcome, setOutcome] = useState<Outcome | null>(null);
@@ -84,13 +91,17 @@ export default function App() {
     const isAsk = task === "ask";
     const canRun = !busy && (!isAsk || question.trim().length > 0);
 
+    // Whole-page requests are the ones most likely to be too large for the device.
+    const needsWholePage = task === "summarize" || task === "ask" || !hasSelection;
+    const showOnDeviceHint = mode === "on-device" && needsWholePage;
+
     function selectTask(next: AITask) {
         if (busy) return;
         setTask(next);
         setOutcome(null);
     }
 
-    async function handleRun() {
+    async function handleRun(runMode: InferenceMode = mode) {
         const q = question.trim();
         if (isAsk && !q) return;
 
@@ -108,7 +119,7 @@ export default function App() {
                 task,
                 context: pageContext,
                 difficulty,
-                inferenceMode: "auto",
+                inferenceMode: runMode,
                 ...(isAsk ? { question: q } : {}),
             });
 
@@ -119,8 +130,9 @@ export default function App() {
                 setOutcome({
                     url: pageUrl,
                     question: null,
-                    error: friendlyError(e),
+                    error: friendlyError(e, runMode),
                     retryable: isRetryable(e),
+                    offerAuto: canSwitchToAuto(e, runMode),
                 });
             }
         } finally {
@@ -161,7 +173,6 @@ export default function App() {
                         <h2 className="mt-1 line-clamp-3 font-serif text-lg font-medium leading-snug">
                             {context.title}
                         </h2>
-
                         <p className="mt-1 text-xs text-muted">
                             {context.headings.length} sections,{" "}
                             {context.content.length.toLocaleString()} characters read
@@ -173,9 +184,11 @@ export default function App() {
                                 {context.content.length.toLocaleString()} characters.
                             </p>
                         )}
+
                         {context.content.length < 300 && (
                             <p className="mt-2 text-xs text-warn">
-                                PagePilot found very little text on this page. Answers may be limited.
+                                PagePilot found very little text on this page. Answers may be
+                                limited.
                             </p>
                         )}
 
@@ -227,15 +240,29 @@ export default function App() {
                     >
                         <p className="font-medium">Couldn't get a response</p>
                         <p className="mt-1 text-muted">{current.error}</p>
-                        {current.retryable && (
-                            <button
-                                onClick={handleRun}
-                                disabled={!canRun}
-                                className="mt-2 text-xs font-medium underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-ink disabled:opacity-50"
-                            >
-                                Try again
-                            </button>
-                        )}
+                        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+                            {current.offerAuto && (
+                                <button
+                                    onClick={() => {
+                                        setMode("auto");
+                                        void handleRun("auto");
+                                    }}
+                                    disabled={!canRun}
+                                    className="text-xs font-medium underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-ink disabled:opacity-50"
+                                >
+                                    Switch to Auto and run again
+                                </button>
+                            )}
+                            {current.retryable && (
+                                <button
+                                    onClick={() => void handleRun()}
+                                    disabled={!canRun}
+                                    className="text-xs font-medium underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-ink disabled:opacity-50"
+                                >
+                                    Try again
+                                </button>
+                            )}
+                        </div>
                     </div>
                 )}
 
@@ -307,9 +334,23 @@ export default function App() {
                     onChange={setDifficulty}
                     disabled={busy}
                 />
+                <Segmented
+                    label="Processing"
+                    value={mode}
+                    options={MODES}
+                    onChange={setMode}
+                    disabled={busy}
+                />
+
+                {showOnDeviceHint && (
+                    <p className="text-xs text-warn">
+                        Whole-page requests can be too large for on-device processing.
+                        Select a passage, or switch to Auto.
+                    </p>
+                )}
 
                 <button
-                    onClick={handleRun}
+                    onClick={() => void handleRun()}
                     disabled={!canRun}
                     className="flex w-full items-center justify-center gap-2 rounded-lg bg-ink px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-ink/90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink disabled:opacity-60"
                 >
@@ -319,9 +360,7 @@ export default function App() {
                     {buttonLabel}
                 </button>
 
-                <p className="text-center text-xs text-muted">
-                    The page text is sent to a cloud AI model to write the response.
-                </p>
+                <p className="text-center text-xs text-muted">{privacyNote(mode)}</p>
             </footer>
         </div>
     );

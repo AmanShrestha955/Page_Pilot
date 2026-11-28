@@ -1,5 +1,4 @@
-
-import type { AIErrorCode } from "../../core/types/ai";
+import type { AIErrorCode, InferenceMode } from "../../core/types/ai";
 
 const GENERIC = "Something went wrong. Try again.";
 
@@ -45,6 +44,10 @@ const NOT_RETRYABLE: ReadonlySet<string> = new Set([
     "CONFIGURATION_ERROR",
 ]);
 
+const ON_DEVICE_UNAVAILABLE =
+    "On-device AI isn't available in this browser or on this device. Switch to Auto to use the cloud when needed.";
+
+
 function getCode(error: unknown): string | null {
     if (typeof error !== "object" || error === null || !("code" in error)) {
         return null;
@@ -53,8 +56,13 @@ function getCode(error: unknown): string | null {
     return typeof error.code === "string" ? error.code : null;
 }
 
-export function friendlyError(error: unknown): string {
+export function friendlyError(error: unknown, mode?: InferenceMode): string {
     const code = getCode(error);
+
+    // "Wait a moment" is wrong advice when the device simply can't run the model.
+    if (mode === "on-device" && code === "MODEL_UNAVAILABLE") {
+        return ON_DEVICE_UNAVAILABLE;
+    }
 
     if (code && Object.hasOwn(ERROR_MESSAGES, code)) {
         return ERROR_MESSAGES[code as AIErrorCode];
@@ -66,4 +74,16 @@ export function friendlyError(error: unknown): string {
 export function isRetryable(error: unknown): boolean {
     const code = getCode(error);
     return !(code && NOT_RETRYABLE.has(code));
+}
+
+const SWITCH_TO_AUTO: ReadonlySet<string> = new Set([
+    "CONTEXT_TOO_LARGE",
+    "INCOMPLETE_CONTEXT",
+    "MODEL_UNAVAILABLE",
+]);
+
+/** True when a strict on-device request failed in a way that Auto could still handle. */
+export function canSwitchToAuto(error: unknown, mode: InferenceMode): boolean {
+    const code = getCode(error);
+    return mode === "on-device" && !!code && SWITCH_TO_AUTO.has(code);
 }
