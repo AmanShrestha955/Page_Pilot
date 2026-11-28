@@ -1,5 +1,6 @@
 import ReactMarkdown from "react-markdown";
-import type { AIResponse } from "../../../core/types/ai";
+import type { AIResponse, InferenceMode } from "../../../core/types/ai";
+import { describeInference } from "../../utils/inference-note";
 import { SpeakControls } from "./SpeakControls";
 
 const iconProps = {
@@ -27,37 +28,20 @@ const CloudIcon = () => (
     </svg>
 );
 
-const MODE_LABEL = { auto: "Auto", "on-device": "On device", cloud: "Cloud" } as const;
+const TONE = { device: "text-device", cloud: "text-cloud", fallback: "text-warn" } as const;
 
-function describe(inf: AIResponse["inference"]) {
-    if (inf.source === "on-device") {
-        return {
-            tone: "text-device",
-            icon: <DeviceIcon />,
-            title: "Answered on your device",
-            detail: "The page text stayed on this device.",
-        };
-    }
-    if (inf.fallbackUsed) {
-        return {
-            tone: "text-warn",
-            icon: <CloudIcon />,
-            title: "Answered in the cloud",
-            detail:
-                "On-device processing wasn't available for this request, so PagePilot used the cloud.",
-        };
-    }
-    return {
-        tone: "text-cloud",
-        icon: <CloudIcon />,
-        title: "Answered in the cloud",
-        detail: "The page text was sent to the cloud model to write this answer.",
-    };
-}
+const MODE_LABEL: Record<InferenceMode, string> = {
+    auto: "Auto",
+    "on-device": "On device",
+    cloud: "Cloud",
+};
 
 export function AnswerCard({ response }: { response: AIResponse }) {
-    const note = describe(response.inference);
     const refs = response.references ?? [];
+
+    const note = describeInference(response.inference);
+    const tone = TONE[note.kind];
+    const icon = note.kind === "device" ? <DeviceIcon /> : <CloudIcon />;
 
     return (
         <article className="rounded-xl bg-paper ring-1 ring-line">
@@ -93,9 +77,9 @@ export function AnswerCard({ response }: { response: AIResponse }) {
             )}
 
             <footer className="flex gap-2.5 border-t border-line px-4 py-3">
-                <span className={"mt-0.5 " + note.tone}>{note.icon}</span>
+                <span className={"mt-0.5 " + tone}>{icon}</span>
                 <div className="text-xs">
-                    <p className={"font-semibold " + note.tone}>{note.title}</p>
+                    <p className={"font-semibold " + tone}>{note.title}</p>
                     <p className="mt-0.5 text-muted">{note.detail}</p>
                     <p className="mt-0.5 text-muted">
                         Processing setting: {MODE_LABEL[response.inference.requestedMode]}
