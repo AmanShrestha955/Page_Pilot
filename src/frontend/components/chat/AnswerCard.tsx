@@ -1,5 +1,6 @@
 import ReactMarkdown from "react-markdown";
 import type { AIResponse } from "../../../core/types/ai";
+import { SpeakControls } from "./SpeakControls";
 
 const iconProps = {
     width: 16,
@@ -60,6 +61,7 @@ export function AnswerCard({ response }: { response: AIResponse }) {
 
     return (
         <article className="rounded-xl bg-paper ring-1 ring-line">
+            <SpeakControls key={response.answer} text={response.answer} />
             <div className="p-4">
                 <div className="space-y-3 font-serif text-[15px] leading-[1.7] [&_:is(h1,h2,h3)]:mt-5 [&_:is(h1,h2,h3)]:font-sans [&_:is(h1,h2,h3)]:text-sm [&_:is(h1,h2,h3)]:font-semibold [&_li+li]:mt-1.5 [&_li]:pl-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_strong]:font-semibold [&_ul]:list-disc [&_ul]:pl-5">
                     <ReactMarkdown>{response.answer}</ReactMarkdown>
